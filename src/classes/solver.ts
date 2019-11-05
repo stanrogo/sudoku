@@ -1,39 +1,36 @@
-import { Component, Vue, Watch } from 'vue-property-decorator';
-import { Getter } from 'vuex-class';
+import { Result } from '@/interfaces/option';
 
-@Component
-export default class Solver extends Vue {
-    private col: number = 0;
-    private row: number = 0;
-    private invalid: number[][][] = [];
+type Callback = (result: Result) => void;
 
-    @Getter
-    private puzzle!: number[][];
+export default class Solver {
+    private col: number;
+    private row: number;
+    private invalid: number[][][];
+    private puzzle: number[][];
+    private solution: number[][];
+    private callbacks: Callback[];
 
-    @Watch('puzzle', { immediate: true, deep: true })
-    public onPuzzleChanged(val: number[][], oldVal: number[][]) {
-        this.solution = val.map((x: number[]) => x.slice(0));
-        this.invalid = val.map((x: number[]) => x.slice(0).map((_) => []));
+    constructor(puzzle: number[][]) {
+        this.puzzle = puzzle;
+        this.solution = puzzle.map((x: number[]) => x.slice(0));
+        this.invalid = puzzle.map((x: number[]) => x.slice(0).map((_) => []));
         this.col = 0;
         this.row = 0;
+        this.callbacks = [];
     }
 
-    private get solution() {
-        return this.$store.state.solution;
+    public onTick(callback: Callback): void {
+        this.callbacks.push(callback);
     }
 
-    private set solution(newVal) {
-        this.$store.commit('updateSolution', newVal);
-    }
-
-    public solve(): Promise<void> {
-        let interval: number;
-
+    public solve(): Promise<number[][]> {
         return new Promise((res) => {
+            let interval: number;
+
             interval = window.setInterval(() => {
                 if (this.row * 9 + this.col >= 9 * 9) {
                     window.clearInterval(interval);
-                    res();
+                    res(this.solution);
                     return;
                 }
 
@@ -55,10 +52,15 @@ export default class Solver extends Vue {
         });
     }
 
-    private updateSolution(newNum: number) {
-        const rowEntry: number[] = this.solution[this.row];
-        rowEntry[this.col] = newNum;
-        Vue.set(this.solution, this.row, rowEntry);
+    private updateSolution(newNum: number): void {
+        this.solution[this.row][this.col] = newNum;
+        this.callbacks.forEach((callback) => {
+            callback({
+                row: this.row,
+                col: this.col,
+                num: newNum,
+            });
+        });
     }
 
     private markRestValid(): void {
@@ -77,17 +79,22 @@ export default class Solver extends Vue {
         const invalidNums: number[] = this.invalid[this.row][this.col];
         const row: number[] = this.solution[this.row];
         const column: number[] = this.solution.map((x: number[]) => x[this.col]);
+        const section: number[] = this.getGridSection();
+        const valid: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((x) => !invalidNums.includes(x));
+        return valid.find((x) => !row.includes(x) && !column.includes(x) && !section.includes(x)) || -1;
+    }
+
+    private getGridSection(): number[] {
         const rowSectionStart: number = this.row - this.row % 3;
         const colSectionStart: number = this.col - this.col % 3;
-        const section: number[] = this.solution.reduce((acc: number[], rowN: number[], i: number) => {
+
+        return this.solution.reduce((acc: number[], rowN: number[], i: number) => {
             if (i < rowSectionStart || i >= rowSectionStart + 3) {
                 return acc;
             }
             const rowSection = rowN.slice(colSectionStart, colSectionStart + 3);
             return acc.concat(rowSection);
         }, []);
-        const valid: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((x) => !invalidNums.includes(x));
-        return valid.find((x) => !row.includes(x) && !column.includes(x) && !section.includes(x)) || -1;
     }
 
     private markAsInvalid(): void {
